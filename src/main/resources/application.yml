@@ -24,8 +24,8 @@ spring:
 
 schema:
   cache-ttl-minutes: 5
-  candidate-tables: 6
-  candidate-columns-per-table: 12
+  candidate-tables: 10
+  candidate-columns-per-table: 50
 
 logging:
   level:

@@ -28,38 +28,34 @@ public class QueryOrchestrator {
 
     public QueryResult handleNaturalLanguage(String userPrompt, String userId) {
         try {
-            // 1. choose candidate tables
+            // 1️⃣ Select candidate tables
             List<TableMeta> candidates = schemaService.findCandidateTables(userPrompt);
 
-            // 2. build prompt
+            // 2️⃣ Build prompt
             String prompt = PromptBuilder.build(userPrompt, candidates);
 
-            // 3. call LLM
-            String raw = String.valueOf(ollama.generateSql(prompt));
-            if (raw == null || raw.isBlank()) return QueryResult.error("LLM returned empty response");
+            // 3️⃣ Call LLM
+            String rawSql = ollama.generateSql(prompt);
+            if (rawSql == null || rawSql.isBlank()) return QueryResult.error("LLM returned empty SQL");
 
-            // extract SQL block if returned in triple backticks
-            String extracted = extractSql(raw);
-
-            // 4. validate
-            var vr = validator.validate(extracted, candidates);
+            // 4️⃣ Validate SQL
+            var vr = validator.validate(rawSql, candidates);
             if (!vr.valid()) {
-                // attempt repair once
-                String repairPrompt = PromptBuilder.buildRepairPrompt(extracted, vr.message(), candidates);
-                String repairedRaw = String.valueOf(ollama.generateSql(repairPrompt));
-                String repaired = extractSql(repairedRaw);
+                // 5️⃣ Repair once if invalid
+                String repairPrompt = PromptBuilder.buildRepairPrompt(rawSql, vr.message(), candidates);
+                String repairedRaw = ollama.generateSql(repairPrompt);
+                String repaired = repairedRaw.trim();
                 var vr2 = validator.validate(repaired, candidates);
                 if (!vr2.valid()) return QueryResult.error("Could not produce valid query: " + vr2.message());
-                var rows = clickHouse.executeReadOnly(vr2.sql());
-                return QueryResult.ok(rows);
+                return QueryResult.ok(clickHouse.executeReadOnly(vr2.sql()));
             }
 
-            var rows = clickHouse.executeReadOnly(vr.sql());
-            return QueryResult.ok(rows);
+            return QueryResult.ok(clickHouse.executeReadOnly(vr.sql()));
         } catch (Exception e) {
             return QueryResult.error("Internal error: " + e.getMessage());
         }
     }
+
 
     private String extractSql(String raw) {
         // crude extraction: take content between ``` and ```

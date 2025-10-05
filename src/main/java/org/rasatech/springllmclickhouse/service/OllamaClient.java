@@ -18,13 +18,9 @@ public class OllamaClient {
     private final WebClient webClient;
 
     public OllamaClient(WebClient.Builder webClientBuilder) {
-        this.webClient = webClientBuilder.baseUrl("http://localhost:11434").build(); // Ollama server URL
+        this.webClient = webClientBuilder.baseUrl("http://localhost:11434").build();
     }
 
-    /**
-     * Generates a ClickHouse SQL query from a natural language prompt.
-     * Extracts the SQL inside triple backticks.
-     */
     public String generateSql(String prompt) {
         try {
             var body = Map.of(
@@ -34,16 +30,29 @@ public class OllamaClient {
             );
 
             String response = webClient.post()
-                    .uri("/api/generate") // ✅ Correct Ollama endpoint
+                    .uri("/api/generate")
                     .contentType(MediaType.APPLICATION_JSON)
                     .bodyValue(body)
                     .retrieve()
                     .bodyToMono(String.class)
-                    .timeout(Duration.ofSeconds(60))
+                    .timeout(Duration.ofMinutes(5))
+                    .onErrorResume(e -> {
+                        log.error("LLM call failed", e);
+                        return Mono.just("Timeout LLM"); // fallback empty string
+                    })
                     .block();
 
-            // ✅ Extract the SQL portion from the response
-            return extractSql(response);
+
+            if (response == null || response.isBlank()) {
+                throw new RuntimeException("Empty response from LLM");
+            }
+
+            // Extract SQL inside triple backticks
+            String sql = extractSql(response);
+            // Fix ClickHouse functions if LLM outputs unsupported ones
+            sql = sql.replaceAll("to_date\\(", "toDate(");
+
+            return sql;
 
         } catch (Exception e) {
             log.error("LLM request failed for prompt: {}", prompt, e);
@@ -51,39 +60,16 @@ public class OllamaClient {
         }
     }
 
-
-    /**
-     * Extracts the SQL query inside triple backticks.
-     * Returns null if no SQL found.
-     */
     private String extractSql(String response) {
-        if (response == null || response.isBlank()) {
-            throw new RuntimeException("Empty response from LLM");
-        }
-
-        // Match content between ```sql ... ```
         Pattern p = Pattern.compile("```sql\\s*(.*?)\\s*```", Pattern.DOTALL);
         Matcher m = p.matcher(response);
-        if (m.find()) {
-            return m.group(1).trim();
-        }
+        if (m.find()) return m.group(1).trim();
 
-        // Fallback: just pick first SELECT query
-        p = Pattern.compile("(SELECT\\s+.*)", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+        // fallback: return first SELECT
+        p = Pattern.compile("(SELECT\\s+.*;)", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
         m = p.matcher(response);
-        if (m.find()) {
-            return m.group(1).trim();
-        }
+        if (m.find()) return m.group(1).trim();
 
-        log.warn("No SQL found in LLM response: {}", response);
-        throw new RuntimeException("Could not extract SQL from response");
-    }
-
-
-    /**
-     * Escapes JSON special characters in prompt
-     */
-    private String escapeJson(String str) {
-        return str.replace("\"", "\\\"").replace("\n", "\\n");
+        return response.trim();
     }
 }

@@ -57,10 +57,11 @@ public class SchemaService {
     // keyword-based candidate selection + column pruning
     public List<TableMeta> findCandidateTables(String userQuery) {
         var full = loadFullSchema();
+
+        // score tables based on user query
+        List<ScoredTable> scored = new ArrayList<>();
         String q = userQuery == null ? "" : userQuery.toLowerCase();
 
-        // simple score: count occurrences of substrings in table name and columns
-        var scored = new ArrayList<ScoredTable>();
         for (var t : full) {
             int score = 0;
             String tname = t.table().toLowerCase();
@@ -70,39 +71,29 @@ public class SchemaService {
                 if (q.contains(col)) score += 2;
                 if (col.contains(q)) score += 1;
             }
-            // small boost if query contains words like "sum","avg","top","sales","product"
-            if (q.contains("sum") || q.contains("top") || q.contains("sales") || q.contains("product")) score += 1;
             scored.add(new ScoredTable(score, t));
         }
-        // sort desc by score then pick top N (filter score>0 otherwise pick default popular tables)
-        scored.sort(Comparator.comparingInt(ScoredTable::score).reversed());
-        List<TableMeta> candidates = scored.stream()
-                .filter(s -> s.score() > 0)
-                .limit(candidateTables)
-                .map(ScoredTable::table)
-                .collect(Collectors.toList());
 
-        // fallback: if none matched, pick first N tables
+        scored.sort(Comparator.comparingInt(ScoredTable::score).reversed());
+
+        // take top N tables (score>0) OR fallback to first N tables
+        List<TableMeta> candidates = scored.stream().filter(s -> s.score() > 0).limit(candidateTables).map(ScoredTable::table).collect(Collectors.toList());
+
         if (candidates.isEmpty()) {
             candidates = full.stream().limit(candidateTables).collect(Collectors.toList());
         }
 
-        // prune columns per table to candidateColumns (prefer columns matching query)
-        List<TableMeta> pruned = new ArrayList<>();
+        // ⚡ IMPORTANT: include **all columns** for each table to prevent validator rejection
+        List<TableMeta> safeCandidates = new ArrayList<>();
         for (var t : candidates) {
-            List<String> cols = t.columns().stream()
-                    .filter(c -> userQuery == null || userQuery.toLowerCase().contains(c.toLowerCase()))
-                    .limit(candidateColumns)
-                    .collect(Collectors.toList());
-            if (cols.isEmpty()) {
-                // fallback take first M columns
-                cols = t.columns().stream().limit(candidateColumns).collect(Collectors.toList());
-            }
-            pruned.add(new TableMeta(t.database(), t.table(), cols));
+            safeCandidates.add(new TableMeta(t.database(), t.table(), t.columns())); // no pruning
         }
-        return pruned;
+
+        return safeCandidates;
     }
+
 
     private record ScoredTable(int score, TableMeta table) {
     }
+
 }
