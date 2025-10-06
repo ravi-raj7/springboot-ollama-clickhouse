@@ -96,4 +96,14 @@ public class SchemaService {
     private record ScoredTable(int score, TableMeta table) {
     }
 
+    // ✅ Add this method for pruning columns per table
+    public List<TableMeta> pruneColumns(List<TableMeta> tables, int maxColumnsPerTable) {
+        return tables.stream()
+                .map(t -> new TableMeta(
+                        t.database(),
+                        t.table(),
+                        t.columns().stream().limit(maxColumnsPerTable).toList()
+                ))
+                .toList();
+    }
 }

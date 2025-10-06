@@ -51,4 +51,17 @@ public class ClickHouseService {
         }
         return rows;
     }
+
+    // ✅ Add this method to validate ClickHouse syntax
+    public boolean validateSyntax(String sql) {
+        try (Connection conn = ds.getConnection();
+             Statement st = conn.createStatement()) {
+            st.executeQuery("EXPLAIN SYNTAX " + sql);
+            return true;
+        } catch (SQLException e) {
+            // Log warning but don't throw exception
+            System.out.println("ClickHouse syntax validation failed: " + e.getMessage());
+            return false;
+        }
+    }
 }
